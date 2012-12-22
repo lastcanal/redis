@@ -34,6 +34,7 @@ endif
 
 distclean:
 	-(cd hiredis && $(MAKE) clean) > /dev/null || true
+	-(cd liblmdb && $(MAKE) clean) > /dev/null || true
 	-(cd linenoise && $(MAKE) clean) > /dev/null || true
 	-(cd lua && $(MAKE) clean) > /dev/null || true
 	-(cd jemalloc && [ -f Makefile ] && $(MAKE) distclean) > /dev/null || true
@@ -46,6 +47,12 @@ hiredis: .make-prerequisites
 	cd hiredis && $(MAKE) static
 
 .PHONY: hiredis
+
+liblmdb: .make-prerequisites
+	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
+	cd liblmdb && $(MAKE) all
+
+.PHONY: liblmdb
 
 linenoise: .make-prerequisites
 	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
