@@ -51,7 +51,7 @@ robj *lookupKey(redisDb *db, robj *key) {
             val->lru = server.lruclock;
         return val;
     } else {
-        return NULL;
+        return recover(db, key);
     }
 }
 
@@ -69,7 +69,9 @@ robj *lookupKeyRead(redisDb *db, robj *key) {
 
 robj *lookupKeyWrite(redisDb *db, robj *key) {
     expireIfNeeded(db,key);
-    return lookupKey(db,key);
+    robj *val = lookupKey(db,key);
+    if (val) val->archived = 0;
+    return val;
 }
 
 robj *lookupKeyReadOrReply(redisClient *c, robj *key, robj *reply) {

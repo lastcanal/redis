@@ -1,9 +1,15 @@
 #include "redis.h"
 #include "endianconv.h"
 
+#include <sys/stat.h>
+#include <lmdb.h>
+
 /* -----------------------------------------------------------------------------
  * DUMP, RESTORE and MIGRATE commands
  * -------------------------------------------------------------------------- */
+
+MDB_env *env;
+MDB_dbi dbi;
 
 /* Generates a DUMP-format representation of the object 'o', adding it to the
  * io stream pointed by 'rio'. This function can't fail. */
@@ -244,4 +250,142 @@ socket_rd_err:
     sdsfree(cmd.io.buffer.ptr);
     close(fd);
     return;
+}
+
+void mdb(void) {
+    int ret;
+
+    if (env != NULL)
+        return;
+
+    ret = mdb_env_create(&env);
+    redisAssert(ret == 0);
+
+    ret = mdb_env_set_mapsize(env, server.mdb_mapsize);
+    redisAssert(ret == 0);
+
+    ret = mdb_env_set_maxdbs(env, 1);
+    redisAssert(ret == 0);
+
+    mkdir(server.mdb_environment, 0644);
+
+    ret = mdb_env_open(env, server.mdb_environment, MDB_FIXEDMAP | MDB_NOSYNC, 0664);
+    redisAssert(ret == 0);
+
+    MDB_txn *txn;
+    ret = mdb_txn_begin(env, NULL, 0, &txn);
+    redisAssert(ret == 0);
+
+    ret = mdb_open(txn, NULL, 0, &dbi);
+    redisAssert(ret == 0);
+
+    mdb_txn_commit(txn);
+}
+
+int archive(redisDb *db, robj *key) {
+    if (server.mdb_state == REDIS_MDB_OFF)
+        return 1;
+
+    mdb();
+
+    MDB_val kval;
+    kval.mv_data = key->ptr;
+    kval.mv_size = sdslen((sds)key->ptr);
+
+    robj *object;
+    object = lookupKey(db, key);
+    if (object == NULL)
+        return 0;
+
+    if (object->archived != 0)
+        return 0;
+
+    rio payload;
+    createDumpPayload(&payload, object);
+
+    MDB_val dval;
+    dval.mv_size = sdslen(payload.io.buffer.ptr);
+    dval.mv_data = payload.io.buffer.ptr;
+
+    int ret;
+
+    MDB_txn *txn;
+    ret = mdb_txn_begin(env, NULL, 0, &txn);
+    if (ret != 0)
+        goto archive_err;
+
+    ret = mdb_put(txn, dbi, &kval, &dval, 0);
+    if (ret != 0) {
+        mdb_txn_abort(txn);
+        goto archive_err;
+    }
+
+    mdb_txn_commit(txn);
+    sdsfree(payload.io.buffer.ptr);
+    return 1;
+
+archive_err:
+    sdsfree(payload.io.buffer.ptr);
+    redisAssert(0);
+    return 0;
+}
+
+robj *recover(redisDb *db, robj *key) {
+    if (server.mdb_state == REDIS_MDB_OFF)
+        return NULL;
+
+    int ret;
+
+    mdb();
+
+    MDB_val kval;
+    kval.mv_data = key->ptr;
+    kval.mv_size = sdslen((sds)key->ptr);
+
+    MDB_txn *txn;
+    ret = mdb_txn_begin(env, NULL, 0, &txn);
+    if (ret != 0)
+        return NULL;
+
+    MDB_cursor *cursor;
+    ret = mdb_cursor_open(txn, dbi, &cursor);
+    if (ret != 0) {
+        mdb_txn_abort(txn);
+        return NULL;
+    }
+
+    MDB_val pval;
+    ret = mdb_cursor_get(cursor, &kval, &pval, MDB_SET);
+    if (ret != 0) {
+        mdb_txn_abort(txn);
+        return NULL;
+    }
+
+    sds sval = sdsnewlen(pval.mv_data, pval.mv_size);
+    mdb_cursor_close(cursor);
+    mdb_txn_abort(txn);
+
+    rio payload;
+    rioInitWithBuffer(&payload, sval);
+
+    int type = rdbLoadObjectType(&payload);
+    if (type == -1)
+        goto recover_err;
+
+    robj *object = rdbLoadObject(type, &payload);
+    if (object == NULL)
+        goto recover_err;
+
+    object->archived = 1;
+
+    dbAdd(db, key, object);
+    signalModifiedKey(db, key);
+    server.dirty++;
+
+    sdsfree(sval);
+    return object;
+
+recover_err:
+    sdsfree(sval);
+    return NULL;
 }

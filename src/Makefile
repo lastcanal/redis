@@ -58,7 +58,7 @@ else
 endif
 
 # Include paths to dependencies
-FINAL_CFLAGS+= -I../deps/hiredis -I../deps/linenoise -I../deps/lua/src
+FINAL_CFLAGS+= -I../deps/hiredis -I../deps/liblmdb -I../deps/linenoise -I../deps/lua/src
 
 ifeq ($(MALLOC),tcmalloc)
   FINAL_CFLAGS+= -DUSE_TCMALLOC
@@ -75,6 +75,8 @@ ifeq ($(MALLOC),jemalloc)
   FINAL_CFLAGS+= -DUSE_JEMALLOC -I../deps/jemalloc/include
   FINAL_LIBS+= ../deps/jemalloc/lib/libjemalloc.a -ldl
 endif
+
+FINAL_LIBS+= ../deps/liblmdb/liblmdb.a
 
 REDIS_CC=$(QUIET_CC)$(CC) $(FINAL_CFLAGS)
 REDIS_LD=$(QUIET_LINK)$(CC) $(FINAL_LDFLAGS)

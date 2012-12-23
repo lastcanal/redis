@@ -163,6 +163,10 @@
 #define REDIS_RDB_ENC_INT32 2       /* 32 bit signed integer */
 #define REDIS_RDB_ENC_LZF 3         /* string compressed with FASTLZ */
 
+/* MDB states */
+#define REDIS_MDB_OFF 0             /* MDB is off */
+#define REDIS_MDB_ON 1              /* MDB is on */
+
 /* AOF states */
 #define REDIS_AOF_OFF 0             /* AOF is off */
 #define REDIS_AOF_ON 1              /* AOF is on */
@@ -310,7 +314,8 @@
 #define REDIS_LRU_CLOCK_RESOLUTION 10 /* LRU clock resolution in seconds */
 typedef struct redisObject {
     unsigned type:4;
-    unsigned notused:2;     /* Not used */
+    unsigned archived:1;
+    unsigned notused:1;     /* Not used */
     unsigned encoding:4;
     unsigned lru:22;        /* lru time (relative to server.lruclock) */
     int refcount;
@@ -589,6 +594,10 @@ struct redisServer {
     time_t rdb_save_time_start;     /* Current RDB save start time. */
     int lastbgsave_status;          /* REDIS_OK or REDIS_ERR */
     int stop_writes_on_bgsave_err;  /* Don't allow writes if can't BGSAVE */
+    /* MDB archival */
+    int mdb_state;                  /* REDIS_MDB_(ON|OFF) */
+    char *mdb_environment;          /* Name of the MDB file */
+    size_t mdb_mapsize;             /* Map size for use with MDB */
     /* Propagation of commands in AOF / replication */
     redisOpArray also_propagate;    /* Additional command to propagate. */
     /* Logging */
@@ -1023,6 +1032,10 @@ int selectDb(redisClient *c, int id);
 void signalModifiedKey(redisDb *db, robj *key);
 void signalFlushedDb(int dbid);
 unsigned int GetKeysInSlot(unsigned int hashslot, robj **keys, unsigned int count);
+
+/* external database archival */
+robj *recover(redisDb *db, robj *key);
+int archive(redisDb *db, robj *key);
 
 /* API to get key arguments from commands */
 #define REDIS_GETKEYS_ALL 0

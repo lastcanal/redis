@@ -256,6 +256,18 @@ void loadServerConfigFromString(char *config) {
             if ((server.daemonize = yesnotoi(argv[1])) == -1) {
                 err = "argument must be 'yes' or 'no'"; goto loaderr;
             }
+        } else if (!strcasecmp(argv[0],"keyarchive") && argc == 2) {
+            int yes;
+
+            if ((yes = yesnotoi(argv[1])) == -1) {
+                err = "argument must be 'yes' or 'no'"; goto loaderr;
+            }
+            server.mdb_state = yes ? REDIS_MDB_ON : REDIS_MDB_OFF;
+        } else if (!strcasecmp(argv[0],"mdb-environment") && argc == 2) {
+            zfree(server.mdb_environment);
+            server.mdb_environment = zstrdup(argv[1]);
+        } else if (!strcasecmp(argv[0],"mdb-mapsize") && argc == 2) {
+            server.mdb_mapsize = memtoll(argv[1], NULL);
         } else if (!strcasecmp(argv[0],"appendonly") && argc == 2) {
             int yes;
 

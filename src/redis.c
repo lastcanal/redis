@@ -1119,6 +1119,9 @@ void initServerConfig() {
     server.pidfile = zstrdup("/var/run/redis.pid");
     server.rdb_filename = zstrdup("dump.rdb");
     server.aof_filename = zstrdup("appendonly.aof");
+    server.mdb_state = REDIS_MDB_OFF;
+    server.mdb_environment = zstrdup("archive");
+    server.mdb_mapsize = 10485760;
     server.requirepass = NULL;
     server.rdb_compression = 1;
     server.rdb_checksum = 1;
@@ -2337,6 +2340,8 @@ int freeMemoryIfNeeded(void) {
                 long long delta;
 
                 robj *keyobj = createStringObject(bestkey,sdslen(bestkey));
+                int archived = archive(db, keyobj);
+                redisAssert(archived != 0);
                 propagateExpire(db,keyobj);
                 /* We compute the amount of memory freed by dbDelete() alone.
                  * It is possible that actually the memory needed to propagate
