@@ -127,7 +127,11 @@ void setKey(redisDb *db, robj *key, robj *val) {
 }
 
 int dbExists(redisDb *db, robj *key) {
-    return dictFind(db->dict,key->ptr) != NULL;
+    if (dictFind(db->dict,key->ptr) != NULL)
+        return 1;
+    if (recover(db, key) != NULL)
+        return 1;
+    return 0;
 }
 
 /* Return a random key, in form of a Redis object.
