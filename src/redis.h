@@ -1026,6 +1026,7 @@ void dbOverwrite(redisDb *db, robj *key, robj *val);
 void setKey(redisDb *db, robj *key, robj *val);
 int dbExists(redisDb *db, robj *key);
 robj *dbRandomKey(redisDb *db);
+int dbDeleteSoft(redisDb *db, robj *key);
 int dbDelete(redisDb *db, robj *key);
 long long emptyDb();
 int selectDb(redisClient *c, int id);
@@ -1038,6 +1039,7 @@ void stopKeyArchive(void);
 int startKeyArchive(void);
 robj *recover(redisDb *db, robj *key);
 int archive(redisDb *db, robj *key);
+void purge(robj *key);
 
 /* API to get key arguments from commands */
 #define REDIS_GETKEYS_ALL 0

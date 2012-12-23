@@ -398,3 +398,27 @@ recover_err:
     sdsfree(sval);
     return NULL;
 }
+
+void purge(robj *key) {
+    if (server.mdb_state == REDIS_MDB_OFF)
+        return;
+
+    int ret;
+
+    MDB_val kval;
+    kval.mv_data = key->ptr;
+    kval.mv_size = sdslen((sds)key->ptr);
+
+    MDB_txn *txn;
+    ret = mdb_txn_begin(env, NULL, 0, &txn);
+    if (ret != 0)
+        return;
+
+    ret = mdb_del(txn, dbi, &kval, NULL);
+    if (ret != 0) {
+        mdb_txn_abort(txn);
+        return;
+    }
+
+    mdb_txn_commit(txn);
+}

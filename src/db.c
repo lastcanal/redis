@@ -162,7 +162,7 @@ robj *dbRandomKey(redisDb *db) {
 }
 
 /* Delete a key, value, and associated expiration entry if any, from the DB */
-int dbDelete(redisDb *db, robj *key) {
+int dbDeleteSoft(redisDb *db, robj *key) {
     /* Deleting an entry from the expires dict will not free the sds of
      * the key, because it is shared with the main dictionary. */
     if (dictSize(db->expires) > 0) dictDelete(db->expires,key->ptr);
@@ -171,6 +171,12 @@ int dbDelete(redisDb *db, robj *key) {
     } else {
         return 0;
     }
+}
+
+/* Delete a key, value, and associated expiration entry if any, even archived */
+int dbDelete(redisDb *db, robj *key) {
+    purge(key);
+    return dbDeleteSoft(db, key);
 }
 
 long long emptyDb() {
