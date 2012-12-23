@@ -311,7 +311,7 @@ int archive(redisDb *db, robj *key) {
         return 0;
 
     if (object->archived != 0)
-        return 0;
+        return 1;
 
     rio payload;
     createDumpPayload(&payload, object);
