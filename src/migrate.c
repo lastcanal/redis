@@ -253,7 +253,6 @@ socket_rd_err:
 }
 
 void stopKeyArchive(void) {
-    redisAssert(server.mdb_state == REDIS_MDB_ON);
     redisAssert(env != NULL);
 
     mdb_dbi_close(env, dbi);
@@ -264,7 +263,6 @@ void stopKeyArchive(void) {
 }
 
 int startKeyArchive(void) {
-    redisAssert(server.mdb_state == REDIS_MDB_OFF);
     redisAssert(env == NULL);
 
     int ret;

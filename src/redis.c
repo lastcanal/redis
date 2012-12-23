@@ -1348,7 +1348,7 @@ void initServer() {
         }
     }
 
-    if (server.aof_state == REDIS_MDB_ON) {
+    if (server.mdb_state == REDIS_MDB_ON) {
         int retval = startKeyArchive();
         if (retval != 0) {
             redisLog(REDIS_WARNING, "Can't open the key-archive environment: %s",
