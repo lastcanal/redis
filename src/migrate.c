@@ -430,3 +430,34 @@ void purge(robj *key) {
 
     mdb_txn_commit(txn);
 }
+
+int rummage(redisClient *c, unsigned long *numkeys) {
+    if (server.mdb_state == REDIS_MDB_OFF)
+        return REDIS_OK;
+
+    int ret;
+
+    MDB_txn *txn;
+    ret = mdb_txn_begin(env, NULL, 0, &txn);
+    if (ret != 0)
+        return REDIS_ERR;
+
+    MDB_cursor *cursor;
+    ret = mdb_cursor_open(txn, dbi, &cursor);
+    if (ret != 0) {
+        mdb_txn_abort(txn);
+        return REDIS_ERR;
+    }
+
+    MDB_val kval;
+    while ((ret = mdb_cursor_get(cursor, &kval, NULL, MDB_NEXT)) == 0) {
+        robj *key = createStringObject(kval.mv_data, kval.mv_size);
+        addReplyBulk(c, key);
+        ++*numkeys;
+        decrRefCount(key);
+    }
+
+    mdb_cursor_close(cursor);
+    mdb_txn_abort(txn);
+    return REDIS_OK;
+}

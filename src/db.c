@@ -317,6 +317,9 @@ void keysCommand(redisClient *c) {
         }
     }
     dictReleaseIterator(di);
+
+    rummage(c, &numkeys);
+
     setDeferredMultiBulkLength(c,replylen,numkeys);
 }
 

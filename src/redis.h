@@ -1040,6 +1040,7 @@ int startKeyArchive(void);
 robj *recover(redisDb *db, robj *key);
 int archive(redisDb *db, robj *key);
 void purge(robj *key);
+int rummage(redisClient *c, unsigned long *numkeys);
 
 /* API to get key arguments from commands */
 #define REDIS_GETKEYS_ALL 0
