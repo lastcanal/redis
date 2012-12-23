@@ -49,6 +49,7 @@
 #include <math.h>
 #include <sys/resource.h>
 #include <sys/utsname.h>
+#include <lmdb.h>
 
 /* Our shared "common" objects */
 
@@ -1343,6 +1344,15 @@ void initServer() {
         if (server.aof_fd == -1) {
             redisLog(REDIS_WARNING, "Can't open the append-only file: %s",
                 strerror(errno));
+            exit(1);
+        }
+    }
+
+    if (server.aof_state == REDIS_MDB_ON) {
+        int retval = startKeyArchive();
+        if (retval != 0) {
+            redisLog(REDIS_WARNING, "Can't open the key-archive environment: %s",
+                mdb_strerror(retval));
             exit(1);
         }
     }

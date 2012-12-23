@@ -511,6 +511,19 @@ void configSetCommand(redisClient *c) {
         if (getLongLongFromObject(o,&ll) == REDIS_ERR ||
             ll < 0 || ll > LONG_MAX) goto badfmt;
         server.maxidletime = ll;
+    } else if (!strcasecmp(c->argv[2]->ptr,"keyarchive")) {
+        int enable = yesnotoi(o->ptr);
+
+        if (enable == -1) goto badfmt;
+        if (enable == 0 && server.mdb_state != REDIS_MDB_OFF) {
+            stopKeyArchive();
+        } else if (enable && server.mdb_state == REDIS_MDB_OFF) {
+            if (startKeyArchive() != 0) {
+                addReplyError(c,
+                    "Unable to turn on MDB. Check server logs.");
+                return;
+            }
+        }
     } else if (!strcasecmp(c->argv[2]->ptr,"appendfsync")) {
         if (!strcasecmp(o->ptr,"no")) {
             server.aof_fsync = AOF_FSYNC_NO;

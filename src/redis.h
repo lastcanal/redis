@@ -1034,6 +1034,8 @@ void signalFlushedDb(int dbid);
 unsigned int GetKeysInSlot(unsigned int hashslot, robj **keys, unsigned int count);
 
 /* external database archival */
+void stopKeyArchive(void);
+int startKeyArchive(void);
 robj *recover(redisDb *db, robj *key);
 int archive(redisDb *db, robj *key);
 

@@ -252,41 +252,54 @@ socket_rd_err:
     return;
 }
 
-void mdb(void) {
+void stopKeyArchive(void) {
+    redisAssert(server.mdb_state == REDIS_MDB_ON);
+    redisAssert(env != NULL);
+
+    mdb_dbi_close(env, dbi);
+    mdb_env_close(env);
+    env = NULL;
+
+    server.mdb_state = REDIS_MDB_OFF;
+}
+
+int startKeyArchive(void) {
+    redisAssert(server.mdb_state == REDIS_MDB_OFF);
+    redisAssert(env == NULL);
+
     int ret;
 
-    if (env != NULL)
-        return;
-
     ret = mdb_env_create(&env);
-    redisAssert(ret == 0);
+    if (ret != 0) return ret;
 
     ret = mdb_env_set_mapsize(env, server.mdb_mapsize);
-    redisAssert(ret == 0);
+    if (ret != 0) return ret;
 
     ret = mdb_env_set_maxdbs(env, 1);
-    redisAssert(ret == 0);
+    if (ret != 0) return ret;
 
     mkdir(server.mdb_environment, 0644);
 
     ret = mdb_env_open(env, server.mdb_environment, MDB_FIXEDMAP | MDB_NOSYNC, 0664);
-    redisAssert(ret == 0);
+    if (ret != 0) return ret;
 
     MDB_txn *txn;
     ret = mdb_txn_begin(env, NULL, 0, &txn);
-    redisAssert(ret == 0);
+    if (ret != 0) return ret;
 
     ret = mdb_open(txn, NULL, 0, &dbi);
-    redisAssert(ret == 0);
+    if (ret != 0) return ret;
 
     mdb_txn_commit(txn);
+
+    server.mdb_state = REDIS_MDB_ON;
+    return 0;
 }
 
 int archive(redisDb *db, robj *key) {
     if (server.mdb_state == REDIS_MDB_OFF)
         return 1;
-
-    mdb();
+    redisAssert(env != NULL);
 
     MDB_val kval;
     kval.mv_data = key->ptr;
@@ -335,8 +348,6 @@ robj *recover(redisDb *db, robj *key) {
         return NULL;
 
     int ret;
-
-    mdb();
 
     MDB_val kval;
     kval.mv_data = key->ptr;
