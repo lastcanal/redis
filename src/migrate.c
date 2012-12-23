@@ -276,9 +276,9 @@ int startKeyArchive(void) {
     ret = mdb_env_set_maxdbs(env, 1);
     if (ret != 0) return ret;
 
-    mkdir(server.mdb_environment, 0644);
+    mkdir(server.mdb_environment, 0755);
 
-    ret = mdb_env_open(env, server.mdb_environment, MDB_FIXEDMAP | MDB_NOSYNC, 0664);
+    ret = mdb_env_open(env, server.mdb_environment, MDB_FIXEDMAP | MDB_NOSYNC, 0644);
     if (ret != 0) return ret;
 
     MDB_txn *txn;
