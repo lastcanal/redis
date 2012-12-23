@@ -285,7 +285,7 @@ int startKeyArchive(void) {
     ret = mdb_txn_begin(env, NULL, 0, &txn);
     if (ret != 0) return ret;
 
-    ret = mdb_open(txn, NULL, 0, &dbi);
+    ret = mdb_dbi_open(txn, NULL, 0, &dbi);
     if (ret != 0) return ret;
 
     mdb_txn_commit(txn);
