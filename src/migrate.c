@@ -255,7 +255,15 @@ socket_rd_err:
 void stopKeyArchive(void) {
     redisAssert(env != NULL);
 
-    mdb_dbi_close(env, dbi);
+    MDB_txn *txn;
+    int ret = mdb_txn_begin(env, NULL, 0, &txn);
+    if (ret != 0)
+        mdb_txn_abort(txn);
+    else {
+        mdb_dbi_close(env, dbi);
+        mdb_txn_commit(txn);
+    }
+
     mdb_env_close(env);
     env = NULL;
 
