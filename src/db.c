@@ -93,6 +93,7 @@ robj *lookupKeyWriteOrReply(redisClient *c, robj *key, robj *reply) {
 void dbAdd(redisDb *db, robj *key, robj *val) {
     sds copy = sdsdup(key->ptr);
     int retval = dictAdd(db->dict, copy, val);
+    val->archived = 0;
 
     redisAssertWithInfo(NULL,key,retval == REDIS_OK);
  }
