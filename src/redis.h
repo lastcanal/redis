@@ -49,6 +49,7 @@
 #include <signal.h>
 
 typedef long long mstime_t; /* millisecond time type. */
+#include <lmdb.h>
 
 #include "ae.h"      /* Event driven programming library */
 #include "sds.h"     /* Dynamic safe strings */
@@ -442,6 +443,8 @@ typedef struct redisDb {
     dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP) */
     dict *ready_keys;           /* Blocked keys that received a PUSH */
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
+    dict *dirty_keys;           /* Keys that have been changed but not yet flushed */
+    dict *flushing_keys;        /* Keys being flushed by a child at the moment */
     int id;
     long long avg_ttl;          /* Average TTL, just for stats */
 } redisDb;
@@ -745,6 +748,25 @@ struct redisServer {
     int stop_writes_on_bgsave_err;  /* Don't allow writes if can't BGSAVE */
     int rdb_pipe_write_result_to_parent; /* RDB pipes used to return the state */
     int rdb_pipe_read_result_from_child; /* of each slave in diskless SYNC. */
+    /* NDS persistence */
+    int nds;                        /* Enable/disable NDS */
+    int nds_preload;                /* Should we load all keys out of NDS on startup? */
+    int nds_preload_in_progress;    /* Are we currently preloading? */
+    int nds_preload_complete;       /* Have we already preloaded? */
+    pid_t nds_child_pid;            /* PID of child flushing to NDS */
+    int nds_snapshot_in_progress;   /* Whether we are currently doing a snapshot dump */
+    int nds_snapshot_pending;       /* Whether we're waiting on another NDS dump to
+                                     * complete before starting an NDS snapshot */
+    redisClient *nds_bg_requestor;  /* The redis client which requested we perform
+                                     * a background NDS operation */
+    unsigned long long stat_nds_cache_hits;  /* Number of times we've been able to fulfill a
+                                              * key lookup from within memory */
+    unsigned long long stat_nds_cache_misses;  /* Number of times we've had to go to disk to
+                                                * fulfill a key lookup */
+    unsigned long long stat_nds_flush_success;  /* How many successful flushes we've done */
+    unsigned long long stat_nds_flush_failure;  /* How many flushes have failed */
+    MDB_env *mdb_env;               /* Global pointer the LMDB 'environment' */
+    int mdb_env_writer;             /* 0/1 for whether mdb_env is open for writing */
     /* Propagation of commands in AOF / replication */
     redisOpArray also_propagate;    /* Additional command to propagate. */
     /* Logging */
@@ -1265,6 +1287,15 @@ unsigned int GetKeysInSlot(unsigned int hashslot, robj **keys, unsigned int coun
 void scanGenericCommand(redisClient *c, robj *o, unsigned long cursor);
 int parseScanCursorOrReply(redisClient *c, robj *o, unsigned long *cursor);
 
+/* The blob we pass into functions that walk the keyspace for keysCommand */
+typedef struct {
+    redisClient *c;
+    sds pattern;
+    int plen;
+    int allkeys;
+    int numkeys;
+} keysCommandWalkerData;
+
 /* API to get key arguments from commands */
 #define REDIS_GETKEYS_ALL 0
 #define REDIS_GETKEYS_PRELOAD 1
@@ -1280,6 +1311,10 @@ void initSentinel(void);
 void sentinelTimer(void);
 char *sentinelHandleConfiguration(char **argv, int argc);
 void sentinelIsRunning(void);
+
+/* Object serialise/deserialise */
+void createDumpPayload(rio *payload, robj *o);
+int verifyDumpPayload(unsigned char *p, size_t len);
 
 /* Scripting */
 void scriptingInit(void);

@@ -28,6 +28,7 @@
  */
 
 #include "redis.h"
+#include "nds.h"
 
 #include <signal.h>
 #include <ctype.h>
@@ -40,10 +41,36 @@ void SlotToKeyDel(robj *key);
  *----------------------------------------------------------------------------*/
 
 robj *lookupKey(redisDb *db, robj *key) {
+    robj *val = NULL;
     dictEntry *de = dictFind(db->dict,key->ptr);
-    if (de) {
-        robj *val = dictGetVal(de);
 
+    if (de) {
+        val = dictGetVal(de);
+    }
+
+    if (server.nds) {
+        if (de) {
+            server.stat_nds_cache_hits++;
+        } else {
+            robj *obj = getNDS(db, key);
+            
+            server.stat_nds_cache_misses++;
+
+            if (obj) {
+                /* It would be neat to be able to use dbAdd here, but we'd end
+                 * up with an unnecessary write to the DB if we did, because
+                 * we're hooking into dbAdd to write keys to the DB.
+                 */
+                sds copy = sdsdup(key->ptr);
+                int retval = dictAdd(db->dict, copy, obj);
+
+                redisAssertWithInfo(NULL,key,retval == REDIS_OK);
+            }
+            val = obj;
+        }
+    }
+    
+    if (val) {
         /* Update the access time for the ageing algorithm.
          * Don't do it if we have a saving child, as this will trigger
          * a copy on write madness. */
@@ -94,6 +121,9 @@ void dbAdd(redisDb *db, robj *key, robj *val) {
 
     redisAssertWithInfo(NULL,key,retval == REDIS_OK);
     if (val->type == REDIS_LIST) signalListAsReady(db, key);
+    if (server.nds) {
+        touchDirtyKey(db, key->ptr);
+    }
  }
 
 /* Overwrite an existing key with a new value. Incrementing the reference
@@ -105,6 +135,9 @@ void dbOverwrite(redisDb *db, robj *key, robj *val) {
     struct dictEntry *de = dictFind(db->dict,key->ptr);
 
     redisAssertWithInfo(NULL,key,de != NULL);
+    if (server.nds) {
+        touchDirtyKey(db, key->ptr);
+    }
     dictReplace(db->dict, key->ptr, val);
 }
 
@@ -157,10 +190,25 @@ robj *dbRandomKey(redisDb *db) {
 
 /* Delete a key, value, and associated expiration entry if any, from the DB */
 int dbDelete(redisDb *db, robj *key) {
+    int delcount = 0;
+
     /* Deleting an entry from the expires dict will not free the sds of
      * the key, because it is shared with the main dictionary. */
     if (dictSize(db->expires) > 0) dictDelete(db->expires,key->ptr);
+
+    if (server.nds && existsNDS(db, key)) {
+        /* The key may not be in memory, just in NDS, so we need to check
+         * there too in order to give the client the right answer to the
+         * DEL command.
+         */
+        delcount++;
+    }
+
     if (dictDelete(db->dict,key->ptr) == DICT_OK) {
+        delcount++;
+    }
+
+    if (delcount > 0) {
         return 1;
     } else {
         return 0;
@@ -213,6 +261,9 @@ long long emptyDb(void(callback)(void*)) {
         removed += dictSize(server.db[j].dict);
         dictEmpty(server.db[j].dict,callback);
         dictEmpty(server.db[j].expires,callback);
+        if (server.nds) {
+            emptyNDS(&(server.db[j]));
+        }
     }
     return removed;
 }
@@ -234,6 +285,9 @@ int selectDb(redisClient *c, int id) {
  *----------------------------------------------------------------------------*/
 
 void signalModifiedKey(redisDb *db, robj *key) {
+    if (server.nds) {
+        touchDirtyKey(db, key->ptr);
+    }
     touchWatchedKey(db,key);
 }
 
@@ -250,6 +304,9 @@ void flushdbCommand(redisClient *c) {
     signalFlushedDb(c->db->id);
     dictEmpty(c->db->dict,NULL);
     dictEmpty(c->db->expires,NULL);
+    if (server.nds) {
+        emptyNDS(c->db);
+    }
     addReply(c,shared.ok);
 }
 
@@ -322,31 +379,61 @@ void randomkeyCommand(redisClient *c) {
     decrRefCount(key);
 }
 
-void keysCommand(redisClient *c) {
-    dictIterator *di;
-    dictEntry *de;
-    sds pattern = c->argv[1]->ptr;
-    int plen = sdslen(pattern), allkeys;
-    unsigned long numkeys = 0;
-    void *replylen = addDeferredMultiBulkLength(c);
-
-    di = dictGetSafeIterator(c->db->dict);
-    allkeys = (pattern[0] == '*' && pattern[1] == '\0');
-    while((de = dictNext(di)) != NULL) {
-        sds key = dictGetKey(de);
-        robj *keyobj;
-
-        if (allkeys || stringmatchlen(pattern,plen,key,sdslen(key),0)) {
-            keyobj = createStringObject(key,sdslen(key));
-            if (expireIfNeeded(c->db,keyobj) == 0) {
-                addReplyBulk(c,keyobj);
-                numkeys++;
-            }
-            decrRefCount(keyobj);
+int keysCommandWalkerCallback(void *data, robj *key) {
+    keysCommandWalkerData *w = (keysCommandWalkerData *)data;
+    
+    if (w->allkeys || stringmatchlen(w->pattern,w->plen,key->ptr,sdslen(key->ptr),0)) {
+        if (expireIfNeeded(w->c->db,key) == 0) {
+            addReplyBulk(w->c,key);
+            w->numkeys++;
         }
     }
-    dictReleaseIterator(di);
-    setDeferredMultiBulkLength(c,replylen,numkeys);
+    
+    return REDIS_OK;
+}
+
+void keysCommand(redisClient *c) {
+    void *replylen = addDeferredMultiBulkLength(c);
+    keysCommandWalkerData w;
+
+    w.pattern = c->argv[1]->ptr;
+    w.plen = sdslen(w.pattern);
+    w.allkeys = (w.pattern[0] == '*' && w.pattern[1] == '\0');
+    w.c = c;
+    w.numkeys = 0;
+
+    if (server.nds) {
+        /* Oh my... this could take a while... */
+        
+        /* First we need to flush all dirty keys to disk, because we only
+         * want to have to walk one database */
+        while (server.nds_child_pid != -1) {
+            usleep(100);
+            checkNDSChildComplete();
+        }
+        if (flushDirtyKeys() == REDIS_ERR) {
+            redisLog(REDIS_WARNING, "flushDirtyKeys() failed in KEYS command -- oh my!");
+            addReplyError(c, "NDS flush failed");
+            return;
+        }
+        postNDSFlushCleanup();
+
+        /* Now we can walk the NDS database, safe in the knowledge that all
+         * possible keys exist there for our inspection. */
+        walkNDS(c->db, keysCommandWalkerCallback, &w, -1);
+    } else {
+        dictIterator *di;
+        dictEntry *de;
+        di = dictGetSafeIterator(c->db->dict);
+        while((de = dictNext(di)) != NULL) {
+            sds key = dictGetKey(de);
+            robj *keyobj = createStringObject(key, sdslen(key));
+            keysCommandWalkerCallback(&w, keyobj);
+            decrRefCount(keyobj);
+        }
+        dictReleaseIterator(di);
+    }
+    setDeferredMultiBulkLength(c,replylen,w.numkeys);
 }
 
 /* This callback is used by scanGenericCommand in order to collect elements
