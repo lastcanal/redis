@@ -3136,7 +3136,7 @@ int freeMemoryIfNeeded(void) {
             /* Finally remove the selected key, (as long as it isn't dirty, if
              * we're using NDS) */
             if (bestkey) {
-                if (server.nds && !isDirtyKey(db, bestkey)) {
+                if (server.nds && isDirtyKey(db, bestkey)) {
                     /* We don't want to delete a dirty key, but at the same
                      * time we don't want to spook the !keys_freed check
                      * below and cause it to scream "OOM!".  So, let's just
