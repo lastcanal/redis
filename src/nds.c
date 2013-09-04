@@ -731,7 +731,7 @@ int flushDirtyKeys() {
 void postNDSFlushCleanup() {
     for (int i = 0; i < server.dbnum; i++) {
         redisDb *db = server.db+i;
-        dictEmpty(db->flushing_keys);
+        dictEmpty(db->flushing_keys, NULL);
     }
     server.lastsave = time(NULL);
     server.stat_nds_flush_success++;
@@ -770,7 +770,7 @@ void backgroundNDSFlushDoneHandler(int exitcode, int bysignal) {
                 dictAdd(db->dirty_keys, sdsdup(dictGetKey(de)), NULL);
             }
             
-            dictEmpty(db->flushing_keys);
+            dictEmpty(db->flushing_keys, NULL);
         }
         
         if (server.nds_bg_requestor) {

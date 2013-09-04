@@ -31,6 +31,7 @@
 #include "lzf.h"    /* LZF compression library */
 #include "zipmap.h"
 #include "endianconv.h"
+#include "nds.h"
 
 #include <math.h>
 #include <sys/types.h>
@@ -626,6 +627,21 @@ int rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val,
     return 1;
 }
 
+int rdbSaveIterator(void *data, robj *key) {
+    rdbSaveIterData *idata = (rdbSaveIterData *)data;
+    long long expire = getExpire(idata->db, key);
+    robj *val = lookupKey(idata->db, key);
+    int rv = 0;
+    
+    if (rdbSaveKeyValuePair(idata->rdb, key, val, expire, idata->now) == -1) {
+    	rv = REDIS_ERR;
+    } else {
+    	rv = REDIS_OK;
+    }
+    
+    return rv;
+}
+
 /* Produces a dump of the database in RDB format sending it to the specified
  * Redis I/O channel. On success REDIS_OK is returned, otherwise REDIS_ERR
  * is returned and part of the output, or all the output, can be
@@ -654,21 +670,41 @@ int rdbSaveRio(rio *rdb, int *error) {
         di = dictGetSafeIterator(d);
         if (!di) return REDIS_ERR;
 
+        rdbSaveIterData idata;
+
+        idata.db = server.db+j;
+        idata.now = now;
+        idata.rdb = rdb;
+
+        d = idata.db->dict;
+        
+
         /* Write the SELECT DB opcode */
         if (rdbSaveType(rdb,REDIS_RDB_OPCODE_SELECTDB) == -1) goto werr;
         if (rdbSaveLen(rdb,j) == -1) goto werr;
 
-        /* Iterate this DB writing every entry */
-        while((de = dictNext(di)) != NULL) {
-            sds keystr = dictGetKey(de);
-            robj key, *o = dictGetVal(de);
-            long long expire;
+        if (server.nds) {
+            if (walkNDS(idata.db, rdbSaveIterator, &idata, -1) == REDIS_ERR) {
+                goto werr;
+            }
+        } else {
 
-            initStaticStringObject(key,keystr);
-            expire = getExpire(db,&key);
-            if (rdbSaveKeyValuePair(rdb,&key,o,expire,now) == -1) goto werr;
+          /* Iterate this DB writing every entry */
+          while((de = dictNext(di)) != NULL) {
+              sds keystr = dictGetKey(de);
+              robj key, *o = dictGetVal(de);
+              long long expire;
+
+              initStaticStringObject(key,keystr);
+              expire = getExpire(db,&key);
+              if (rdbSaveKeyValuePair(rdb,&key,o,expire,now) == -1) goto werr;
+          }
+
+          dictReleaseIterator(di);
+          
+
         }
-        dictReleaseIterator(di);
+
     }
     di = NULL; /* So that we don't release it again on error. */
 
@@ -1601,3 +1637,4 @@ void bgsaveCommand(redisClient *c) {
         addReply(c,shared.err);
     }
 }
+
