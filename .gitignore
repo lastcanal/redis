@@ -2,6 +2,8 @@
 *.o
 *.log
 dump.rdb
+data.mdb
+lock.mdb
 redis-benchmark
 redis-check-aof
 redis-check-dump
@@ -22,8 +24,7 @@ src/redis.conf
 deps/lua/src/lua
 deps/lua/src/luac
 deps/lua/src/liblua.a
+deps/liblmdb/liblmdb.a
 .make-*
 .prerequisites
 *.dSYM
-data.mdb
-lock.mdb
